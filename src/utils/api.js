@@ -220,11 +220,49 @@ function buildContentBlocks(message, proto) {
 }
 
 function buildMessages(chatMessages, proto) {
-  return chatMessages.map(m => {
+  const result = []
+  for (const m of chatMessages) {
+    const toolUses = m.toolUses || []
+    const toolResults = m.toolResults || []
+
+    // OpenAI: assistant with tool_calls + separate "tool" messages
+    if (proto === 'openai') {
+      if (m.role === 'assistant' && toolUses.length > 0) {
+        result.push({
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: toolUses.map(tu => ({
+            id: tu.id, type: 'function',
+            function: { name: tu.name, arguments: JSON.stringify(tu.input) },
+          })),
+        })
+        continue
+      }
+      if (toolResults.length > 0) {
+        for (const tr of toolResults) {
+          result.push({ role: 'tool', tool_call_id: tr.id, content: tr.output })
+        }
+        continue
+      }
+    }
+
+    // Gemini: function responses
+    if (proto === 'gemini' && toolResults.length > 0) {
+      result.push({
+        role: 'function',
+        parts: toolResults.map(tr => ({
+          functionResponse: { name: tr.name, response: { content: tr.output } },
+        })),
+      })
+      continue
+    }
+
+    // Default (Anthropic or plain messages)
     const role = m.role === 'assistant' ? (proto === 'gemini' ? 'model' : 'assistant') : 'user'
     const content = buildContentBlocks(m, proto)
-    return { role, content }
-  })
+    result.push({ role, content })
+  }
+  return result
 }
 
 // ---- request builders ----
