@@ -47,6 +47,7 @@ export default function Settings({ settings, onSave, onClose }) {
     apiKey: settings.apiKey || '',
     model: settings.model || 'claude-sonnet-4-6',
     baseUrl: settings.baseUrl || '',
+    toolsEnabled: settings.toolsEnabled !== false,
   }))
 
   const current = PROVIDERS.find(p => p.id === local.provider) || PROVIDERS[0]
@@ -146,6 +147,17 @@ export default function Settings({ settings, onSave, onClose }) {
           />
           <span className="hint">{needsCustomBase ? '手动填写你的 API 地址' : '可修改，留空使用默认地址'}</span>
         </label>
+
+        {local.protocol === 'anthropic' && (
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={local.toolsEnabled}
+              onChange={(e) => setLocal({ ...local, toolsEnabled: e.target.checked })}
+            />
+            <span>启用本地工具调用（需要授权文件夹访问）</span>
+          </label>
+        )}
 
         <button className="btn-primary" onClick={() => { onSave(local); onClose() }}>保存设置</button>
       </div>
