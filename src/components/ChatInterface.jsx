@@ -18,7 +18,7 @@ function readFileAsData(file) {
   })
 }
 
-export default function ChatInterface({ conversation, onSend, onGrantDir }) {
+export default function ChatInterface({ conversation, onSend, onGrantDir, dirLabel, serverOnline }) {
   const [input, setInput] = useState('')
   const [files, setFiles] = useState([])
   const messagesEnd = useRef(null)
@@ -77,6 +77,7 @@ export default function ChatInterface({ conversation, onSend, onGrantDir }) {
 
       <FilePreview files={files} onRemove={removeFile} />
 
+      {serverOnline && <div className="server-indicator">{'🟢'} 本地服务已连接 — AI 可直接读写文件、执行命令</div>}
       {dirLabel && <div className="dir-indicator">{'📂'} 已授权文件夹: {dirLabel}</div>}
 
       <form className="chat-input-area" onSubmit={handleSubmit}>

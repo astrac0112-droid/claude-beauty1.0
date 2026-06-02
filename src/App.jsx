@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar'
 import ChatInterface from './components/ChatInterface'
 import Settings from './components/Settings'
 import { sendMessage } from './utils/api'
-import { TOOLS, executeTool, setDirectoryHandle, getDirectoryHandle } from './utils/tools'
+import { TOOLS, executeTool, setDirectoryHandle, checkServer, isServerAvailable } from './utils/tools'
 
 const STORAGE_KEY = 'claude-beauty-conversations'
 const SETTINGS_KEY = 'claude-beauty-settings'
@@ -13,6 +13,8 @@ function App() {
   const [activeConvId, setActiveConvId] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
   const [dirLabel, setDirLabel] = useState(null)
+  const [serverOnline, setServerOnline] = useState(false)
+
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem(SETTINGS_KEY)
     if (saved) {
@@ -24,6 +26,13 @@ function App() {
     }
     return { provider: 'anthropic-claude', protocol: 'anthropic', apiKey: '', model: 'claude-sonnet-4-6', baseUrl: '', toolsEnabled: true }
   })
+
+  // Check local server on mount
+  useEffect(() => {
+    checkServer().then(setServerOnline)
+    const interval = setInterval(() => { checkServer().then(setServerOnline) }, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
@@ -97,10 +106,9 @@ function App() {
       return updated
     }))
 
-    const toolsEnabled = settings.toolsEnabled !== false && settings.protocol === 'anthropic'
+    const toolsEnabled = settings.toolsEnabled !== false
     const allSettings = toolsEnabled ? { ...settings, tools: TOOLS } : settings
 
-    // Start the tool-use loop: send, collect tool calls, execute, send again.
     let loopMessages = [...(conversations.find(c => c.id === activeConvId)?.messages || []), userMsg]
 
     while (true) {
@@ -141,7 +149,6 @@ function App() {
           }
         )
 
-        // No tool calls → done
         if (toolUses.length === 0) {
           setConversations(prev => prev.map(c => {
             if (c.id !== activeConvId) return c
@@ -155,14 +162,12 @@ function App() {
           break
         }
 
-        // Execute tool calls
         const toolResults = []
         for (const tool of toolUses) {
           const output = await executeTool(tool.name, tool.input)
           toolResults.push({ id: tool.id, name: tool.name, input: tool.input, output })
         }
 
-        // Update the assistant message with tool uses
         const finalContent = fullContent || '(调用工具中...)'
         setConversations(prev => prev.map(c => {
           if (c.id !== activeConvId) return c
@@ -170,18 +175,13 @@ function App() {
           const last = msgs[msgs.length - 1]
           if (last.role === 'assistant') {
             msgs[msgs.length - 1] = {
-              ...last,
-              streaming: false,
-              content: finalContent,
-              usage: result?.usage || null,
-              toolUses,
-              toolResults,
+              ...last, streaming: false, content: finalContent,
+              usage: result?.usage || null, toolUses, toolResults,
             }
           }
           return { ...c, messages: msgs }
         }))
 
-        // Add tool results to the conversation loop and continue
         loopMessages = [
           ...loopMessages,
           { role: 'assistant', content: finalContent, toolUses },
@@ -222,12 +222,13 @@ function App() {
             onSend={handleSend}
             onGrantDir={handleGrantDir}
             dirLabel={dirLabel}
+            serverOnline={serverOnline}
           />
         ) : (
           <div className="empty-state">
             <div className="empty-content">
               <h1>Claude Beauty</h1>
-              <p>点击左侧「新对话」开始聊天，支持上传文件和本地工具调用</p>
+              <p>上传文件或启动本地服务，让 AI 直接操作你的桌面</p>
               <button className="btn-primary" onClick={createConversation}>开始新对话</button>
             </div>
           </div>
