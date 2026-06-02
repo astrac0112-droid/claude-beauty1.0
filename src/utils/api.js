@@ -2,126 +2,157 @@
 
 export const PROTOCOLS = ['anthropic', 'openai', 'gemini']
 
-// ---- stream parsers (return { usage, toolUses }) ----
+// ---- stream parsers (closure-based to persist state across chunks) ----
 
-function parseAnthropic(lines, onChunk, onTool) {
+function makeAnthropicParser() {
   let usage = null
-  const toolBlocks = {}  // index -> partial tool use
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t.startsWith('data: ')) continue
-    const d = t.slice(6)
-    if (d === '[DONE]') continue
-    try {
-      const j = JSON.parse(d)
+  const toolBlocks = {}
+  const flushed = new Set()
 
-      // text delta
-      if (j.type === 'content_block_delta') {
-        if (j.delta?.type === 'text_delta') onChunk(j.delta.text || '')
-        if (j.delta?.type === 'input_json_delta' && onTool) {
-          const idx = j.index
-          if (!toolBlocks[idx]) toolBlocks[idx] = { id: '', name: '', input: '' }
-          toolBlocks[idx].input += j.delta.partial_json || ''
-        }
-      }
+  function parse(lines, onChunk, onTool) {
+    for (const line of lines) {
+      const t = line.trim()
+      if (!t.startsWith('data: ')) continue
+      const d = t.slice(6)
+      if (d === '[DONE]') continue
+      try {
+        const j = JSON.parse(d)
 
-      // tool_use block start
-      if (j.type === 'content_block_start' && j.content_block?.type === 'tool_use') {
-        const cb = j.content_block
-        toolBlocks[j.index] = { id: cb.id, name: cb.name, input: '' }
-      }
-
-      // usage
-      if (j.type === 'message_start' && j.message?.usage) {
-        usage = { inputTokens: j.message.usage.input_tokens || 0, outputTokens: 0 }
-      }
-      if (j.type === 'message_delta' && j.usage?.output_tokens) {
-        if (!usage) usage = { inputTokens: 0, outputTokens: 0 }
-        usage.outputTokens = j.usage.output_tokens
-      }
-    } catch { /* skip */ }
-  }
-  // flush complete tool blocks
-  if (onTool) {
-    for (const tb of Object.values(toolBlocks)) {
-      if (tb.id && tb.name) {
-        try { tb.input = JSON.parse(tb.input) } catch { /* partial, ignore */ }
-        onTool(tb)
-      }
-    }
-  }
-  return usage
-}
-
-function parseOpenAI(lines, onChunk, onTool) {
-  let usage = null
-  const toolCalls = {}
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t.startsWith('data: ')) continue
-    const d = t.slice(6)
-    if (d === '[DONE]') continue
-    try {
-      const j = JSON.parse(d)
-      const delta = j.choices?.[0]?.delta
-
-      if (delta?.content) onChunk(delta.content)
-
-      // tool calls
-      if (delta?.tool_calls && onTool) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index
-          if (!toolCalls[idx]) toolCalls[idx] = { id: tc.id || '', name: '', input: '' }
-          if (tc.id) toolCalls[idx].id = tc.id
-          if (tc.function?.name) toolCalls[idx].name = tc.function.name
-          if (tc.function?.arguments) toolCalls[idx].input += tc.function.arguments
-        }
-      }
-
-      if (j.usage) {
-        usage = { inputTokens: j.usage.prompt_tokens || 0, outputTokens: j.usage.completion_tokens || 0 }
-      }
-    } catch { /* skip */ }
-  }
-  if (onTool) {
-    for (const tc of Object.values(toolCalls)) {
-      if (tc.id && tc.name) {
-        try { tc.input = JSON.parse(tc.input) } catch { /* keep string */ }
-        onTool(tc)
-      }
-    }
-  }
-  return usage
-}
-
-function parseGemini(lines, onChunk, onTool) {
-  let usage = null
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t.startsWith('data: ')) continue
-    const d = t.slice(6)
-    if (d === '[DONE]') continue
-    try {
-      const j = JSON.parse(d)
-      const parts = j.candidates?.[0]?.content?.parts
-      if (parts) {
-        for (const p of parts) {
-          if (p.text) onChunk(p.text)
-          if (p.functionCall && onTool) {
-            onTool({
-              id: 'gemini-' + Date.now(),
-              name: p.functionCall.name,
-              input: p.functionCall.args || {},
-            })
+        if (j.type === 'content_block_delta') {
+          if (j.delta?.type === 'text_delta') onChunk(j.delta.text || '')
+          if (j.delta?.type === 'input_json_delta' && onTool) {
+            const idx = j.index
+            if (!toolBlocks[idx]) toolBlocks[idx] = { id: '', name: '', input: '' }
+            toolBlocks[idx].input += j.delta.partial_json || ''
           }
         }
-      }
-      if (j.usageMetadata) {
-        usage = { inputTokens: j.usageMetadata.promptTokenCount || 0, outputTokens: j.usageMetadata.candidatesTokenCount || 0 }
-      }
-    } catch { /* skip */ }
+
+        if (j.type === 'content_block_start' && j.content_block?.type === 'tool_use') {
+          const cb = j.content_block
+          toolBlocks[j.index] = { id: cb.id, name: cb.name, input: '' }
+        }
+
+        // message_stop or message_delta signals end of tool blocks → flush
+        if (j.type === 'message_stop' || (j.type === 'message_delta' && j.delta?.stop_reason)) {
+          if (onTool) {
+            for (const [idx, tb] of Object.entries(toolBlocks)) {
+              if (tb.id && tb.name && !flushed.has(idx)) {
+                flushed.add(idx)
+                try { tb.input = JSON.parse(tb.input) } catch { /* partial JSON, skip */ }
+                onTool(tb)
+              }
+            }
+          }
+        }
+
+        if (j.type === 'message_start' && j.message?.usage) {
+          usage = { inputTokens: j.message.usage.input_tokens || 0, outputTokens: 0 }
+        }
+        if (j.type === 'message_delta' && j.usage?.output_tokens) {
+          if (!usage) usage = { inputTokens: 0, outputTokens: 0 }
+          usage.outputTokens = j.usage.output_tokens
+        }
+      } catch { /* skip */ }
+    }
+    return usage
   }
-  return usage
+
+  return parse
+}
+
+function makeOpenAIParser() {
+  let usage = null
+  const toolCalls = {}
+
+  function parse(lines, onChunk, onTool) {
+    for (const line of lines) {
+      const t = line.trim()
+      if (!t.startsWith('data: ')) continue
+      const d = t.slice(6)
+      if (d === '[DONE]') {
+        // stream end → flush all accumulated tool calls
+        if (onTool) {
+          for (const tc of Object.values(toolCalls)) {
+            if (tc.id && tc.name && tc.input) {
+              try { tc.input = JSON.parse(tc.input) } catch { /* keep string */ }
+              onTool({ id: tc.id, name: tc.name, input: tc.input })
+            }
+          }
+        }
+        continue
+      }
+      try {
+        const j = JSON.parse(d)
+        const delta = j.choices?.[0]?.delta
+        const finishReason = j.choices?.[0]?.finish_reason
+
+        if (delta?.content) onChunk(delta.content)
+
+        // accumulate tool call fragments across chunks
+        if (delta?.tool_calls && onTool) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0
+            if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', input: '' }
+            if (tc.id) toolCalls[idx].id = tc.id
+            if (tc.function?.name) toolCalls[idx].name = tc.function.name
+            if (tc.function?.arguments) toolCalls[idx].input += tc.function.arguments
+          }
+        }
+
+        // finish_reason with tool_calls → flush completed tool calls
+        if (finishReason === 'tool_calls' && onTool) {
+          for (const tc of Object.values(toolCalls)) {
+            if (tc.id && tc.name && tc.input) {
+              try { tc.input = JSON.parse(tc.input) } catch { /* keep string */ }
+              onTool({ id: tc.id, name: tc.name, input: tc.input })
+            }
+          }
+        }
+
+        if (j.usage) {
+          usage = { inputTokens: j.usage.prompt_tokens || 0, outputTokens: j.usage.completion_tokens || 0 }
+        }
+      } catch { /* skip */ }
+    }
+    return usage
+  }
+
+  return parse
+}
+
+function makeGeminiParser() {
+  let usage = null
+
+  function parse(lines, onChunk, onTool) {
+    for (const line of lines) {
+      const t = line.trim()
+      if (!t.startsWith('data: ')) continue
+      const d = t.slice(6)
+      if (d === '[DONE]') continue
+      try {
+        const j = JSON.parse(d)
+        const parts = j.candidates?.[0]?.content?.parts
+        if (parts) {
+          for (const p of parts) {
+            if (p.text) onChunk(p.text)
+            if (p.functionCall && onTool) {
+              onTool({
+                id: 'gemini-' + Date.now(),
+                name: p.functionCall.name,
+                input: p.functionCall.args || {},
+              })
+            }
+          }
+        }
+        if (j.usageMetadata) {
+          usage = { inputTokens: j.usageMetadata.promptTokenCount || 0, outputTokens: j.usageMetadata.candidatesTokenCount || 0 }
+        }
+      } catch { /* skip */ }
+    }
+    return usage
+  }
+
+  return parse
 }
 
 // ---- stream reader ----
@@ -294,7 +325,7 @@ function buildAnthropic(messages, model, system, apiKey, base, tools) {
       },
       body: JSON.stringify(body),
     },
-    parser: parseAnthropic,
+    parser: makeAnthropicParser(),
   }
 }
 
@@ -316,7 +347,7 @@ function buildOpenAI(messages, model, system, apiKey, base, tools) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     },
-    parser: parseOpenAI,
+    parser: makeOpenAIParser(),
   }
 }
 
@@ -339,7 +370,7 @@ function buildGemini(messages, model, system, apiKey, base, tools) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    parser: parseGemini,
+    parser: makeGeminiParser(),
   }
 }
 
