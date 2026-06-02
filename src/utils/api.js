@@ -267,40 +267,26 @@ function buildMessages(chatMessages, proto) {
       continue
     }
 
-    // OpenAI: assistant with tool_calls + separate "tool" messages
-    if (proto === 'openai') {
-      if (m.role === 'assistant' && toolUses.length > 0) {
-        result.push({
-          role: 'assistant',
-          content: m.content || null,
-          tool_calls: toolUses.map(tu => ({
-            id: tu.id, type: 'function',
-            function: { name: tu.name, arguments: JSON.stringify(tu.input) },
-          })),
-        })
+    // Only Anthropic uses native tool_use/tool_result blocks
+    // Other protocols: tool calls are intercepted client-side, results sent as plain text
+    if (proto === 'anthropic') {
+      if (m.role === 'tool' && toolResult) {
+        result.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolResult.id, content: toolResult.output }] })
         continue
       }
-      if (toolResults.length > 0) {
-        for (const tr of toolResults) {
-          result.push({ role: 'tool', tool_call_id: tr.id, content: tr.output })
-        }
-        continue
-      }
+      // toolUses and toolResults are handled by buildContentBlocks for Anthropic
     }
 
-    // Gemini: function responses
-    if (proto === 'gemini' && toolResults.length > 0) {
-      result.push({
-        role: 'function',
-        parts: toolResults.map(tr => ({
-          functionResponse: { name: tr.name, response: { content: tr.output } },
-        })),
-      })
-      continue
-    }
+    // For non-Anthropic: strip toolUses/toolResults, keep only plain text content
+    // (tool results are already sent as plain user messages in the conversation loop)
 
-    // Default (Anthropic or plain messages)
-    const role = m.role === 'assistant' ? (proto === 'gemini' ? 'model' : 'assistant') : (m.role === 'tool' ? 'user' : 'user')
+    // Default (plain messages)
+    let role = m.role === 'assistant' ? 'assistant' : 'user'
+    // Stored tool result message → convert to plain user message
+    if (m.role === 'tool' && toolResult) {
+      role = 'user'
+      m = { ...m, content: `[工具返回: ${toolResult.name}]\n${toolResult.output}` }
+    }
     const content = buildContentBlocks(m, proto)
     result.push({ role, content })
   }

@@ -169,26 +169,45 @@ function App() {
         }
 
         const finalContent = fullContent || '(调用工具中...)'
-        // Store assistant message with toolUses, then separate tool-result messages
+        const isAnthropic = settings.protocol === 'anthropic'
         setConversations(prev => prev.map(c => {
           if (c.id !== activeConvId) return c
           const msgs = [...c.messages]
           const last = msgs[msgs.length - 1]
           if (last.role === 'assistant') {
             msgs[msgs.length - 1] = { ...last, streaming: false, content: finalContent, usage: result?.usage || null, toolUses }
-            // Append tool results as separate messages
-            for (const tr of toolResults) {
-              msgs.push({ role: 'tool', toolResult: tr, timestamp: Date.now(), model: settings.model })
+            if (isAnthropic) {
+              for (const tr of toolResults) {
+                msgs.push({ role: 'tool', toolResult: tr, timestamp: Date.now(), model: settings.model })
+              }
+            } else {
+              const resultText = toolResults.map(tr =>
+                `[工具执行结果: ${tr.name}]\n${tr.output}`
+              ).join('\n\n')
+              if (resultText) msgs.push({ role: 'user', content: resultText, timestamp: Date.now() })
             }
           }
           return { ...c, messages: msgs }
         }))
 
-        loopMessages = [
-          ...loopMessages,
-          { role: 'assistant', content: finalContent, toolUses },
-          { role: 'user', content: '', toolResults },
-        ]
+        // For Anthropic: use native tool_use/tool_result blocks
+        // For other protocols: send tool results as plain text (avoids tool_calls pairing issues)
+        if (settings.protocol === 'anthropic') {
+          loopMessages = [
+            ...loopMessages,
+            { role: 'assistant', content: finalContent, toolUses },
+            { role: 'user', content: '', toolResults },
+          ]
+        } else {
+          const resultText = toolResults.map(tr =>
+            `[工具执行结果: ${tr.name}]\n${tr.output}`
+          ).join('\n\n')
+          loopMessages = [
+            ...loopMessages,
+            { role: 'assistant', content: finalContent, toolUses },
+            { role: 'user', content: resultText },
+          ]
+        }
 
       } catch (err) {
         setConversations(prev => prev.map(c => {
