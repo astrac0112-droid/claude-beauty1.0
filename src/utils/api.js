@@ -2,9 +2,10 @@
 
 export const PROTOCOLS = ['anthropic', 'openai', 'gemini']
 
-// ---- stream parsers ----
+// ---- stream parsers (return accumulated usage) ----
 
 function parseAnthropic(lines, onChunk) {
+  let usage = null
   for (const line of lines) {
     const t = line.trim()
     if (!t.startsWith('data: ')) continue
@@ -13,24 +14,42 @@ function parseAnthropic(lines, onChunk) {
     try {
       const j = JSON.parse(d)
       if (j.type === 'content_block_delta') onChunk(j.delta?.text || '')
+      if (j.type === 'message_start' && j.message?.usage) {
+        usage = { inputTokens: j.message.usage.input_tokens || 0, outputTokens: 0 }
+      }
+      if (j.type === 'message_delta' && j.usage?.output_tokens) {
+        if (!usage) usage = { inputTokens: 0, outputTokens: 0 }
+        usage.outputTokens = j.usage.output_tokens
+      }
     } catch { /* skip */ }
   }
+  return usage
 }
 
 function parseOpenAI(lines, onChunk) {
+  let usage = null
   for (const line of lines) {
     const t = line.trim()
     if (!t.startsWith('data: ')) continue
     const d = t.slice(6)
     if (d === '[DONE]') continue
     try {
-      const c = JSON.parse(d).choices?.[0]?.delta?.content
+      const j = JSON.parse(d)
+      const c = j.choices?.[0]?.delta?.content
       if (c) onChunk(c)
+      if (j.usage) {
+        usage = {
+          inputTokens: j.usage.prompt_tokens || 0,
+          outputTokens: j.usage.completion_tokens || 0,
+        }
+      }
     } catch { /* skip */ }
   }
+  return usage
 }
 
 function parseGemini(lines, onChunk) {
+  let usage = null
   for (const line of lines) {
     const t = line.trim()
     if (!t.startsWith('data: ')) continue
@@ -40,8 +59,15 @@ function parseGemini(lines, onChunk) {
       const j = JSON.parse(d)
       const text = j.candidates?.[0]?.content?.parts?.[0]?.text
       if (text) onChunk(text)
+      if (j.usageMetadata) {
+        usage = {
+          inputTokens: j.usageMetadata.promptTokenCount || 0,
+          outputTokens: j.usageMetadata.candidatesTokenCount || 0,
+        }
+      }
     } catch { /* skip */ }
   }
+  return usage
 }
 
 // ---- stream reader helper ----
@@ -50,14 +76,17 @@ async function readStream(response, parseFn, onChunk) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let usage = null
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() || ''
-    parseFn(lines, onChunk)
+    const u = parseFn(lines, onChunk)
+    if (u) usage = u
   }
+  return usage
 }
 
 // ---- builders ----
@@ -153,7 +182,8 @@ export async function sendMessage(messages, settings, onChunk) {
     const msg = err.error?.message || err.error?.code || `HTTP ${res.status}`
     throw new Error(msg)
   }
-  await readStream(res, req.parser, onChunk)
+  const usage = await readStream(res, req.parser, onChunk)
+  return { usage }
 }
 
 function inferProtocol(provider) {

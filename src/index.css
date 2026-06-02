@@ -242,6 +242,31 @@ body {
   margin-bottom: 0;
 }
 
+/* Token usage */
+.message-usage {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.message-usage .usage-item {
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+}
+
+.message-usage .usage-cost {
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+.message-usage .usage-sep {
+  margin: 0 4px;
+  opacity: 0.4;
+}
+
 .message.user .message-content {
   background: var(--user-bubble);
   padding: 10px 16px;

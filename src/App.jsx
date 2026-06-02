@@ -112,7 +112,7 @@ function App() {
       }))
 
       let fullContent = ''
-      await sendMessage(messages, settings, (chunk) => {
+      const result = await sendMessage(messages, settings, (chunk) => {
         fullContent += chunk
         setConversations(prev => prev.map(c => {
           if (c.id !== activeConvId) return c
@@ -130,7 +130,7 @@ function App() {
         const msgs = [...c.messages]
         const last = msgs[msgs.length - 1]
         if (last.role === 'assistant') {
-          msgs[msgs.length - 1] = { ...last, streaming: false, content: fullContent }
+          msgs[msgs.length - 1] = { ...last, streaming: false, content: fullContent, usage: result?.usage || null, model: settings.model }
         }
         return { ...c, messages: msgs }
       }))
