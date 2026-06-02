@@ -23,13 +23,16 @@ export default function MessageItem({ message }) {
   const cost = usage ? calcCost(usage.inputTokens, usage.outputTokens, model) : null
   const showUsage = !isUser && usage && usage.inputTokens + usage.outputTokens > 0
 
+  const modelLabel = model || 'AI'
+  const avatar = isUser ? '👤' : model?.includes('gemini') ? '🌐' : model?.includes('gpt') || model?.includes('o3') || model?.includes('o4') ? '🧠' : '🌸'
+
   return (
     <div className={`message ${isUser ? 'user' : 'assistant'}`}>
       <div className="message-avatar">
-        {isUser ? '👤' : '🌸'}
+        {avatar}
       </div>
       <div className="message-body">
-        <div className="message-role">{isUser ? '你' : 'Claude'}</div>
+        <div className="message-role">{isUser ? '你' : modelLabel}</div>
         <div className="message-content">
           {isUser ? (
             <p>{message.content}</p>

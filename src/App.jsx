@@ -97,7 +97,7 @@ function App() {
       return updated
     }))
 
-    const assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), streaming: true }
+    const assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), streaming: true, model: settings.model }
 
     setConversations(prev => prev.map(c => {
       if (c.id !== activeConvId) return c
