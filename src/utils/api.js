@@ -257,36 +257,19 @@ function buildMessages(chatMessages, proto) {
     const toolResults = m.toolResults || []
     const toolResult = m.toolResult  // standalone tool result message
 
-    // Standalone tool result message (from stored conversation)
+    // Stored tool result message
     if (m.role === 'tool' && toolResult) {
-      if (proto === 'openai') {
-        result.push({ role: 'tool', tool_call_id: toolResult.id, content: toolResult.output })
-      } else if (proto === 'anthropic') {
+      if (proto === 'anthropic') {
         result.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolResult.id, content: toolResult.output }] })
+      } else {
+        // Non-Anthropic: convert to plain text user message
+        result.push({ role: 'user', content: `[工具返回: ${toolResult.name}]\n${toolResult.output}` })
       }
       continue
     }
 
-    // Only Anthropic uses native tool_use/tool_result blocks
-    // Other protocols: tool calls are intercepted client-side, results sent as plain text
-    if (proto === 'anthropic') {
-      if (m.role === 'tool' && toolResult) {
-        result.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolResult.id, content: toolResult.output }] })
-        continue
-      }
-      // toolUses and toolResults are handled by buildContentBlocks for Anthropic
-    }
-
-    // For non-Anthropic: strip toolUses/toolResults, keep only plain text content
-    // (tool results are already sent as plain user messages in the conversation loop)
-
     // Default (plain messages)
     let role = m.role === 'assistant' ? 'assistant' : 'user'
-    // Stored tool result message → convert to plain user message
-    if (m.role === 'tool' && toolResult) {
-      role = 'user'
-      m = { ...m, content: `[工具返回: ${toolResult.name}]\n${toolResult.output}` }
-    }
     const content = buildContentBlocks(m, proto)
     result.push({ role, content })
   }
