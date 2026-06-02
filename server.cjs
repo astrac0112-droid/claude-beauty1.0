@@ -70,7 +70,22 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/ping') {
-    return json(res, { ok: true, cwd: process.cwd(), pid: process.pid })
+    return json(res, { ok: true, cwd: process.cwd(), pid: process.pid, platform: process.platform })
+  }
+
+  if (req.method === 'POST' && req.url === '/cd') {
+    let body = ''
+    req.on('data', c => body += c)
+    req.on('end', () => {
+      try {
+        const { dir } = JSON.parse(body)
+        process.chdir(path.resolve(dir))
+        json(res, { ok: true, cwd: process.cwd() })
+      } catch (e) {
+        json(res, { error: e.message }, 400)
+      }
+    })
+    return
   }
 
   if (req.method === 'POST') {

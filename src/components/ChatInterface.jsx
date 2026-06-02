@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import MessageItem from './MessageItem'
 import FilePreview from './FilePreview'
+import Terminal from './Terminal'
 
 function readFileAsData(file) {
   return new Promise((resolve, reject) => {
@@ -79,6 +80,8 @@ export default function ChatInterface({ conversation, onSend, onGrantDir, dirLab
 
       {serverOnline && <div className="server-indicator">{'🟢'} 本地服务已连接 — AI 可直接读写文件、执行命令</div>}
       {dirLabel && <div className="dir-indicator">{'📂'} 已授权文件夹: {dirLabel}</div>}
+
+      <Terminal serverOnline={serverOnline} />
 
       <form className="chat-input-area" onSubmit={handleSubmit}>
         <input
