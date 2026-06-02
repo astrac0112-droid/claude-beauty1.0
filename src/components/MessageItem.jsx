@@ -33,14 +33,16 @@ export default function MessageItem({ message }) {
     return <ToolBlock block={{ type: 'tool_result', ...toolResult }} />
   }
 
+  const iteration = message.iteration  // agent iteration count
   const modelLabel = model || 'AI'
+  const agentLabel = !isUser && iteration > 1 ? `${modelLabel} · Agent 第${iteration}轮` : modelLabel
   const avatar = isUser ? '👤' : model?.includes('gemini') ? '\u{1F310}' : model?.includes('gpt') || model?.includes('o3') || model?.includes('o4') ? '\u{1F9E0}' : '\u{1F338}'
 
   return (
     <div className={`message ${isUser ? 'user' : 'assistant'}`}>
       <div className="message-avatar">{avatar}</div>
       <div className="message-body">
-        <div className="message-role">{isUser ? '你' : modelLabel}</div>
+        <div className="message-role">{isUser ? '你' : agentLabel}</div>
 
         {files.length > 0 && (
           <div className="message-files">

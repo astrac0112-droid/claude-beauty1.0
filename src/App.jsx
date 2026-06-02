@@ -107,12 +107,34 @@ function App() {
     }))
 
     const toolsEnabled = settings.toolsEnabled !== false
+    const isAnthropic = settings.protocol === 'anthropic'
     const allSettings = toolsEnabled ? { ...settings, tools: TOOLS } : settings
 
-    let loopMessages = [...(conversations.find(c => c.id === activeConvId)?.messages || []), userMsg]
+    // Agent system prompt — tells AI it has tools and should use them proactively
+    const agentPrompt = toolsEnabled ? `You are an AI agent running on the user's local machine. You have access to tools that let you read/write files, list directories, and execute shell commands. Use these tools PROACTIVELY and AUTONOMOUSLY to complete the user's request.
 
-    while (true) {
-      const assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), streaming: true, model: settings.model, toolUses: [] }
+Rules:
+- Plan your approach, then execute tools step by step.
+- Observe results and adapt. If one approach fails, try another.
+- Do NOT ask the user to do things you can do yourself.
+- When you have completed the task, summarize what you did.
+- Be thorough. The user wants you to actually DO things, not just explain how.
+- All file paths are real paths on the user's machine.` : null
+
+    // Build conversation messages: inject agent prompt as system message if using tools
+    const conv = conversations.find(c => c.id === activeConvId)
+    let loopMessages = [...(conv?.messages || []), userMsg]
+    if (agentPrompt) {
+      loopMessages = [{ role: 'system', content: agentPrompt }, ...loopMessages]
+    }
+
+    // Max agent iterations to prevent infinite loops
+    const MAX_ITER = 10
+    let iteration = 0
+
+    while (iteration < MAX_ITER) {
+      iteration++
+      const assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), streaming: true, model: settings.model, toolUses: [], iteration }
 
       setConversations(prev => prev.map(c => {
         if (c.id !== activeConvId) return c
