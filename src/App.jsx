@@ -169,14 +169,16 @@ function App() {
         }
 
         const finalContent = fullContent || '(调用工具中...)'
+        // Store assistant message with toolUses, then separate tool-result messages
         setConversations(prev => prev.map(c => {
           if (c.id !== activeConvId) return c
           const msgs = [...c.messages]
           const last = msgs[msgs.length - 1]
           if (last.role === 'assistant') {
-            msgs[msgs.length - 1] = {
-              ...last, streaming: false, content: finalContent,
-              usage: result?.usage || null, toolUses, toolResults,
+            msgs[msgs.length - 1] = { ...last, streaming: false, content: finalContent, usage: result?.usage || null, toolUses }
+            // Append tool results as separate messages
+            for (const tr of toolResults) {
+              msgs.push({ role: 'tool', toolResult: tr, timestamp: Date.now(), model: settings.model })
             }
           }
           return { ...c, messages: msgs }

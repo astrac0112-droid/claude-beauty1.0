@@ -18,14 +18,20 @@ function formatCost(c) {
 }
 
 export default function MessageItem({ message }) {
+  const isTool = message.role === 'tool'
   const isUser = message.role === 'user'
   const usage = message.usage
   const model = message.model
   const cost = usage ? calcCost(usage.inputTokens, usage.outputTokens, model) : null
-  const showUsage = !isUser && usage && usage.inputTokens + usage.outputTokens > 0
+  const showUsage = !isUser && !isTool && usage && usage.inputTokens + usage.outputTokens > 0
   const files = message.files || []
   const toolUses = message.toolUses || []
   const toolResults = message.toolResults || []
+  const toolResult = message.toolResult  // standalone tool result message
+
+  if (isTool && toolResult) {
+    return <ToolBlock block={{ type: 'tool_result', ...toolResult }} />
+  }
 
   const modelLabel = model || 'AI'
   const avatar = isUser ? '👤' : model?.includes('gemini') ? '\u{1F310}' : model?.includes('gpt') || model?.includes('o3') || model?.includes('o4') ? '\u{1F9E0}' : '\u{1F338}'

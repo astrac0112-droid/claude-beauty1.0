@@ -255,6 +255,17 @@ function buildMessages(chatMessages, proto) {
   for (const m of chatMessages) {
     const toolUses = m.toolUses || []
     const toolResults = m.toolResults || []
+    const toolResult = m.toolResult  // standalone tool result message
+
+    // Standalone tool result message (from stored conversation)
+    if (m.role === 'tool' && toolResult) {
+      if (proto === 'openai') {
+        result.push({ role: 'tool', tool_call_id: toolResult.id, content: toolResult.output })
+      } else if (proto === 'anthropic') {
+        result.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolResult.id, content: toolResult.output }] })
+      }
+      continue
+    }
 
     // OpenAI: assistant with tool_calls + separate "tool" messages
     if (proto === 'openai') {
@@ -289,7 +300,7 @@ function buildMessages(chatMessages, proto) {
     }
 
     // Default (Anthropic or plain messages)
-    const role = m.role === 'assistant' ? (proto === 'gemini' ? 'model' : 'assistant') : 'user'
+    const role = m.role === 'assistant' ? (proto === 'gemini' ? 'model' : 'assistant') : (m.role === 'tool' ? 'user' : 'user')
     const content = buildContentBlocks(m, proto)
     result.push({ role, content })
   }
