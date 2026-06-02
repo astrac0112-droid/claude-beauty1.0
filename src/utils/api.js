@@ -321,8 +321,8 @@ export async function sendMessage(messages, settings, onChunk, onTool) {
 
   const formatted = buildMessages(chatMessages, proto)
 
-  // Only include tools for Anthropic protocol (most reliable streaming tool_use)
-  const tools = proto === 'anthropic' ? settings.tools : null
+  // Send tools if enabled (works for all protocols)
+  const tools = settings.tools?.length ? settings.tools : null
 
   let req
   switch (proto) {
